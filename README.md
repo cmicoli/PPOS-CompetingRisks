@@ -1,5 +1,5 @@
 
-# Predictive probability of success (PPOS) - application with time-to-event data in the presence of competing risks
+# Predictive probability of success (PPOS) - application with time-to-event data in the presence of competing event data. 
 
 Chiara Micoli, Andrea Discacciati
 
