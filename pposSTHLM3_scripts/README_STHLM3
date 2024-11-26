@@ -1,0 +1,27 @@
+Description of PPOS in STHLM3 dataset (scripts and steps to follow): analysis were runned on tensor. Logs are available to know R versions and libraries versions. 
+Files are available @ /Users/chimic/Library/CloudStorage/OneDrive-KarolinskaInstitutet/PROJECTS/PPOS/Programs - vector-forGithub/pposSTHLM3_scripts_github
+
+==============================================================================
+- "00Functions_pch_sim.R" contains the functions to simulate the PCH data and to calculate the PPOS score. 
+~/Library/CloudStorage/OneDrive-KarolinskaInstitutet/PROJECTS/PPOS/Programs - vector-forGithub/pposSTHLM3_scripts_github/00Functions_pch_sim.R
+
+- "00Functions_weibull_sim.R" contains the functions to simulate the weibull data. 
+~/Library/CloudStorage/OneDrive-KarolinskaInstitutet/PROJECTS/PPOS/Programs - vector-forGithub/pposSTHLM3_scripts_github/00Functions_weibull_sim.R
+
+- "PCH_AR1_STHLM3.stan" contains the stan code to fit the PCH model to the STHLM3 data.
+~/Library/CloudStorage/OneDrive-KarolinskaInstitutet/PROJECTS/PPOS/Programs - vector-forGithub/pposSTHLM3_scripts_github/PCH_AR1_STHLM3.stan
+==============================================================================
+
+  PHASE1: modelling
+- "1_STHLM3_modelFit_total.R" for fitting models from different modelling strategy. 
+Interanlly calls "1a_STHLM3_modelFit_PCH_AR1.R" and "1b_STHLM3_modelFit_brms.R" for fitting PCH and Weibull models respectively.
+
+  PHASE2 and PHASE3: prediction and anlysis
+- "2_STHLM3_pred&Analysis_total.R" for prediction and analysis repeatedly done for each modelling strategy and adding different numbers of extra follow-up time. 
+Internally calls "2a_STHLM3_pred&analysis_pch.R" and "2b_STHLM3_pred&analysis_weibull.R" for prediction and analysis for each modelling strategy.
+
+  FIG2: 
+- Fig2 of the manuscript is produced using: "3_STHLM3_pred_Fig2.R"
+
+==============================================================================
+More info are at the beginning of each Rscript. 
