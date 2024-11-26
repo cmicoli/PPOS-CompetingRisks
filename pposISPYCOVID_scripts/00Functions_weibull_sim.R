@@ -1,3 +1,5 @@
+## Functions for PPOS analysis in the ISPY-COVID example
+
 cdf_all_w <- function(t, beta1, beta2, model_matrix) {
   stopifnot(length(beta1) == length(beta2))
   #stopifnot(length(t) == 1)
