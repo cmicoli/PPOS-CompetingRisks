@@ -20,9 +20,7 @@ competing risks data.”
 Functions can be `source`’d directly from R:
 
 ``` r
-source("C:/Users/chimic/OneDrive - Karolinska Institutet (1)/PROJECTS/PPOS_I_SPY_COVID/Programs/00Functions_weibull_PPOS.R")
-
-#source("https://raw.githubusercontent.com/cmicoli/PPOS-CompetingRisks/main/00Functions_weibull_PPOS.R")
+source("https://raw.githubusercontent.com/cmicoli/PPOS-CompetingRisks/main/00Functions_weibull_PPOS.R")
 source("https://raw.githubusercontent.com/anddis/brms-weibullPH/main/weibullPH_funs.R")
 ```
 
