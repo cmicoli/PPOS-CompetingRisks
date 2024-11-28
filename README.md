@@ -11,7 +11,7 @@ Last updated: 2024-08-12
 
 ------------------------------------------------------------------------
 
-Example for results presented in the project “Simulation-based Bayesian predictive probability of success for
+Example for results presented in the paper: “Simulation-based Bayesian predictive probability of success for
 interim monitoring of clinical trials with competing event data: two case studies”
 
 ------------------------------------------------------------------------
