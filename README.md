@@ -11,9 +11,8 @@ Last updated: 2024-08-12
 
 ------------------------------------------------------------------------
 
-Example for results presented in the project “Bayesian predictive
-probability of success for interim monitoring of clinical trials with
-competing risks data.”
+Example for results presented in the project “Simulation-based Bayesian predictive probability of success for
+interim monitoring of clinical trials with competing event data: two case studies”
 
 ------------------------------------------------------------------------
 
