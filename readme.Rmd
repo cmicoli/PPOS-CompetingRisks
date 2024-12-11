@@ -1,0 +1,394 @@
+---
+#title: "readme"
+#author: "Chiara"
+#date: "2024-07-30"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, comment = "")
+```
+
+# Predictive probability of success (PPOS) - application with time-to-event data in the presence of competing risks
+
+Chiara Micoli, Andrea Discacciati
+
+Karolinska Institutet, Sweden
+
+Published: 2024-08-12
+
+Last updated: 2024-08-12
+
+------------------------------------------------------------------------
+
+Example for results presented in the project "Bayesian predictive probability of success for interim monitoring of clinical trials with competing risks data."
+
+------------------------------------------------------------------------
+
+Functions can be `source`’d directly from R:
+
+```{r}
+source("https://raw.githubusercontent.com/cmicoli/PPOS-CompetingRisks/main/00Functions_weibull_PPOS.R")
+source("https://raw.githubusercontent.com/anddis/brms-weibullPH/main/weibullPH_funs.R")
+```
+
+```{r, message=FALSE, warning=FALSE}
+RNGkind("L'Ecuyer-CMRG")
+set.seed(123)
+
+library(brms)
+library(rstanarm)
+library(survival)
+library(tidybayes)
+library(tidyverse)
+library(parallel)
+```
+
+```{r}
+theme_set(theme_bw())
+```
+
+### Simulate right-censored survival data.
+
+Simulating data until interim analysis, corresponding to an interim data collection.
+
+```{r}
+dat <- local({
+  set.seed(1901)
+  N <- 150
+  TR <- rbinom(N, 1, 0.45)
+  c <- rbinom(N, 1, 0.1)
+  z <- rnorm(N)
+  y <- flexsurv::rweibullPH(N, 
+                            shape =  0.4, # gamma
+                            scale = exp(-0.5 + log(0.5)*TR + log(0.2)*z)) # mu
+  cens <- runif(N, 0, 60)
+  time <- pmin(y, cens)
+  status <- as.numeric(y <= cens)
+  
+  event <- ifelse(status == 1, rbinom(N, 1, 0.3) + 1, 0) #competing events 1-2
+   
+  data.frame(
+    ID = 1:N,
+    TIME = time,
+    status = status,
+    censored = 1 - status,
+    EVENT = event,
+    TREATMENT =  factor(TR,
+                            levels = c(0, 1),   
+                            labels = c("CNTR", "NEW_TR")), #factor(TR),
+    c = factor(c),
+    z = z
+  )
+})
+
+
+head(dat)
+```
+
+Presenting event summary for controls and new treatment group (85 CNTR vs 65 NEW_TR): event 1 and event 2 are the two competing events, 0 for censored data.
+
+```{r}
+table(dat$TREATMENT,  useNA = "ifany")
+table(dat$TREATMENT, dat$EVENT, useNA = "ifany")
+summary(dat$TIME)
+```
+
+Preparing data for fitting brms models.
+
+```{r}
+dat$event.all <- ifelse(dat$EVENT %in% c(1,2), 1, 0)
+dat$event1 <- dat$event.all * (dat$EVENT == 1)
+dat$event2 <- dat$event.all * (dat$EVENT == 2)
+dat$censored1 <- 1 - dat$event1
+dat$censored2 <- 1 - dat$event2
+```
+
+## Definition of success
+
+Time to recovery is analyzed in the trial by using a Weibull distribution with prespecified weakly informative priors. To do so event 1 ($i=1$) and event 2 ($i=2$) are considered as competing events, and two separate Bayesian proportional-hazard Weibull models will be used, one for each competing outcome $i$. For each model, we will let the logarithm of the Weibull distribution’s scale parameter u to depend on treatment arm (X; new treatment or control arm) and on baseline value of C, so that $log(u_i) = \alpha_i + \beta_i X + \gamma_i C$. The distribution’s shape parameter ($v^i$), which is constrained to be positive, will not depend on any covariates. The following priors are used in the primary analysis:
+
+$\alpha_i \sim Normal (0, 20)$
+
+$\beta_i \sim Normal (0, \sqrt{0.5})$
+
+$\gamma_i \sim Normal (0, \sqrt{0.5})$
+
+$v_i \sim Exponential(1)$
+
+Success is here defined as achieving the probability threshold for the new treatment to graduate to the next phase of drug development. The rule for graduation is formalized as $P(csHR_{event1} > 1 | Data) \geq 0.975$.
+
+## Analysis at interm
+
+Start by fitting Fit Weibull PH model with brms. Model to fit: we consider treatment arm and one binary covariate (c) in the models.
+
+```{r}
+## models 
+bbff1 <- bf(TIME | cens(censored1) ~   0 + Intercept + TREATMENT + c,
+            family = weibullPH)
+bbff2 <- bf(TIME | cens(censored2) ~   0 + Intercept + TREATMENT + c,
+            family = weibullPH)
+```
+
+```{r}
+## output is median HR, and 95% qCrI for treatment effect, 
+## and probability of recovery graduating : p(HR >1 | Dati) = # draws with HR >1 / 4000
+fit.main.event1 <- brm(bbff1,
+                  data = dat,     
+                  chains = 4,
+                  iter = 1500,
+                  warmup = 500,
+                  seed = 12345,
+                  cores = 1,
+                  stanvars = stanvars_weibullPH,
+                  prior = c(prior(normal(0, 20), class = "b", coef = "Intercept"),
+                            prior(normal(0, sqrt(.5)), class = b), 
+                            prior(exponential(1), class = gamma)),
+                  backend = "cmdstanr", ## rstan
+                  refresh = 0)
+fit.main.event2 <- brm(bbff2,
+                  data = dat,     
+                  chains = 4,
+                  iter = 1500,
+                  warmup = 500,
+                  seed = 12345,
+                  cores = 1,
+                  stanvars = stanvars_weibullPH,
+                  prior = c(prior(normal(0, 20), class = "b", coef = "Intercept"),
+                            prior(normal(0, sqrt(.5)), class = b), 
+                            prior(exponential(1), class = gamma)),
+                  backend = "cmdstanr", ## rstan
+                  refresh = 0) 
+```
+
+```{r}
+#fit.main.event1
+pos.draws <- fit.main.event1 %>% 
+    tidybayes::spread_draws(b_Intercept, b_TREATMENTNEW_TR , b_c1   , gamma)
+  # print(dim(pos.draws))
+  # print(colSums(is.na(pos.draws)))
+HR.CrI <- quantile(exp(pos.draws$b_TREATMENTNEW_TR),
+                     probs =c(0.5, 0.025, 0.975),  na.rm = FALSE) %>% 
+    as.data.frame() %>% t() 
+HR.CrI.pr <- HR.CrI %>% 
+    cbind(count.HRvs1  = sum(exp(pos.draws$b_TREATMENTNEW_TR)>1)) %>% 
+    as.data.frame() %>%
+    mutate(pr = count.HRvs1 /dim(pos.draws)[1], ## probability of graduating in this dataset
+           success = ifelse(pr > 0.975, 1, 0 )) ## definition of success with this dataset
+HR.CrI.pr
+```
+
+# Predictive probability of success analysis
+
+### 1. Splitting observed data
+
+Administrative censoring after 60 days.
+
+```{r}
+# splitting between completely observed and censored data
+dat1 <- dat %>% filter(event.all == 1 | TIME  == 60) %>% 
+  select(ID, TREATMENT, c, TIME, EVENT)  ## 101 patients
+dat0_cens <- dat %>% filter(event.all == 0 & TIME < 60) ## 32 patients
+```
+
+### 2. Defining number simulations K
+
+```{r}
+nsim <- 3  ## K
+# cores to use in the fitting if parallelized
+cores <- 1 
+```
+
+### 3. Predicting baseline allocation of new patients
+
+Maximum enrollement for the new treatment arm is 125.
+
+```{r}
+extra.new.tr <- 125 - sum(dat$TREATMENT == "NEW_TR")
+## new treatment has to be present 60 times, X is the number of controls needed to enroll 60 new_tr
+D_new <- lapply (1:nsim, function(x) {
+  n.control <- rnbinom(1, extra.new.tr, 0.45)
+  d <- data.frame(
+    ID = paste0("NEW", seq_len(n.control+ extra.new.tr)),
+    TREATMENT = factor(rep(c("CNTR", "NEW_TR"), times = c(n.control, extra.new.tr))),
+    c = factor(sample(c(0, 1), n.control+extra.new.tr, replace = TRUE, prob = c(0.9, 0.1)))
+  )
+})
+
+# dat0 contains data that need prediction, either update of follow up for dat0_cens, or for D_new
+dat0 <- lapply (D_new, function(x) {
+  dat0 <- dat0_cens %>% 
+    select(ID, TREATMENT, c, TIME, EVENT) %>%
+    rbind (x %>% 
+             mutate(TIME = 0, EVENT = 0))
+})
+
+```
+
+Splitting into control and new treatment dataset, for future steps where we will fit separate models
+
+```{r}
+# new treatment datasets
+dat_new.tr1 <- dat %>% filter(TREATMENT == "NEW_TR") %>% 
+  filter(event.all == 1 | TIME  == 60) %>% 
+  select(ID, TREATMENT, c, TIME, EVENT)  ## 45 patients
+dat_new.tr0 <- lapply(dat0, \(x) x %>% filter(TREATMENT == "NEW_TR") )
+                      #function(x) {  dat_new.tr0 <-  x %>% filter(TREATMENT == "NEW_TR")})
+## 89 patients to predict: 32 already enrolled, 60 new
+
+# control datasets
+dat_control1 <- dat %>% filter(TREATMENT == "CNTR") %>% 
+  filter(event.all == 1 | TIME  == 60) %>% 
+  select(ID, TREATMENT, c, TIME, EVENT)  ## 55 patients
+dat_control0 <- lapply(dat0, \(x) x %>% filter(TREATMENT == "CNTR") )
+## XX patients to predict: 22 already enrolled, new patients in the trial (new accruals - from negative binomial)
+```
+
+## STRATEGY A
+
+Modeling stratifying over treatment arm, using C as the only covariate in the model.
+
+### 4.A - Modeling step
+
+```{r}
+## models 
+bbff1.modelingA <- bf(TIME | cens(censored1) ~   0 + Intercept  + c,
+            family = weibullPH)
+bbff2.modelingA <- bf(TIME | cens(censored2) ~   0 + Intercept  + c,
+            family = weibullPH)
+```
+
+```{r}
+# model fit for new treatment arm
+fit_new.tr <- fit.noPH(dataset = dat %>% filter(TREATMENT == "NEW_TR"), 
+                       brms_function1 = bbff1.modelingA,
+                       brms_function2 = bbff2.modelingA   )
+
+# model fit for control arm 
+fit_control <- fit.noPH(dataset = dat %>% filter(TREATMENT == "CNTR"), 
+                        brms_function1 = bbff1.modelingA,
+                        brms_function2 = bbff2.modelingA   )
+```
+
+## 5.A - Predictive step
+
+```{r}
+## new predicted dataset 
+predicted_new.tr <- predicted_dataset_noPH(data_to_predict = dat_new.tr0, 
+                                               data_observed = dat_new.tr1, 
+                                               n.sim = nsim, 
+                                               model1 = fit_new.tr$Fit1, 
+                                               model2 = fit_new.tr$Fit2, 
+                                               cores = cores)
+
+predicted_control <- predicted_dataset_noPH(data_to_predict = dat_control0, 
+                                                data_observed = dat_control1, 
+                                                n.sim = nsim, 
+                                                model1 = fit_control$Fit1, 
+                                                model2 = fit_control$Fit2, 
+                                                cores = cores)
+
+#predicted <- lapply (1:nsim , \(x) rbind(predicted_control[[x]] , 
+ #                                        predicted_new.tr [[x]]))
+
+predicted <- lapply (1:nsim , \(x) rbind(predicted_control[[x]] , 
+                                         predicted_new.tr [[x]]) %>%
+                                    mutate(event.predicted = ifelse(is.na(event.predicted), 0,
+                                                                    event.predicted), 
+                                           time.predicted = ifelse(time.predicted == 0, 0.01,
+                                                                   time.predicted)))
+
+```
+
+## 6.A - Analytic step
+
+```{r, message =FALSE}
+## analysis of new predicted dataset 
+fit.null_analysis <- compile.analysis.model(predicted[[1]])
+
+predicted_an <- mclapply(predicted, 
+                         \(x)  main.analysis.update(dataset = x, fit.null = fit.null_analysis),
+                         mc.cores = cores)
+```
+
+```{r}
+analysis.HR <- as.data.frame(do.call(rbind, predicted_an %>% map(2)))
+head(analysis.HR)
+```
+
+```{r}
+PPOS <- as.numeric(1 - (table(analysis.HR$success, useNA = "ifany") %>% prop.table() )[1])
+PPOS
+```
+
+## STRATEGY B
+
+Modeling using PH assumption on the treatment effect and adding prior belief on treatment effect, using C as extra covariate in the model.
+
+Choosing $\mu$ and $\sigma$ for prior on the treatment effect
+
+```{r}
+mu.fit <- 2
+sd.fit <- 0.1 
+```
+
+### 4.B - Modeling step
+
+Prior on treatment effect centered on $log(2)$
+```{r}
+## models 
+bbff1.modelingB <- bf(TIME | cens(censored1) ~   0 + Intercept + TREATMENT + c,
+            family = weibullPH)
+bbff2.modelingB <- bf(TIME | cens(censored2) ~   0 + Intercept + TREATMENT + c,
+            family = weibullPH)
+```
+
+
+```{r}
+# model fit 
+fit_HR2 <- fit.PH.HR(dataset = dat, 
+                     brms_function1 = bbff1.modelingB,
+                     brms_function2 = bbff2.modelingB,
+                     HR.mean = log(mu.fit), 
+                     HR.sd = sqrt(sd.fit))
+```
+
+### 5.B - Predictive step
+
+```{r}
+pred.datasets_HR2 <- predicted_dataset_PH.HR(data_to_predict = dat0, 
+                           data_observed = dat1, 
+                           model1 = fit_HR2$Fit1, 
+                           model2 = fit_HR2$Fit2, 
+                           n.sim = nsim , cores)
+
+pred.datasets_HR2 <- lapply (1:nsim , \(x) pred.datasets_HR2[[x]] %>%
+                                    mutate(event.predicted = ifelse(is.na(event.predicted), 0,
+                                                                    event.predicted), 
+                                           time.predicted = ifelse(time.predicted == 0, 0.01, time.predicted)))
+```
+
+### 6.B - Analytic step
+
+```{r, message =FALSE}
+fit.null_analysis <- compile.analysis.model(pred.datasets_HR2[[1]])
+
+analysis.datasets_HR2 <- mclapply(pred.datasets_HR2, 
+                                  \(x) main.analysis.update(x, fit.null_analysis), mc.cores = cores)
+```
+
+```{r}
+analysis.HR2 <- as.data.frame(do.call(rbind, analysis.datasets_HR2 %>% map(2)))
+```
+
+```{r}
+table(analysis.HR2$success, useNA = "ifany")
+PPOS <- as.numeric(1 - (table(analysis.HR2$success, useNA = "ifany") %>% prop.table() )[1])
+PPOS
+```
+
+# Session info.
+
+```{r}
+sessionInfo()
+```
