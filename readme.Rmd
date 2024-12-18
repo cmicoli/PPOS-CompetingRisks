@@ -1,7 +1,4 @@
 ---
-#title: "readme"
-#author: "Chiara"
-#date: "2024-07-30"
 output: github_document
 ---
 
@@ -9,7 +6,7 @@ output: github_document
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, comment = "")
 ```
 
-# Predictive probability of success (PPOS) - application with time-to-event data in the presence of competing risks
+# Predictive probability of success (PPoS) - application to time-to-event data in the presence of competing risks
 
 Chiara Micoli, Andrea Discacciati
 
@@ -17,11 +14,11 @@ Karolinska Institutet, Sweden
 
 Published: 2024-08-12
 
-Last updated: 2024-08-12
+Last updated: `r Sys.Date()`
 
 ------------------------------------------------------------------------
 
-Example for results presented in the project "Bayesian predictive probability of success for interim monitoring of clinical trials with competing risks data."
+Reproducible example using simulated data for the the paper "Simulation-based Bayesian predictive probability of success for interim monitoring of clinical trials with competing event data: two case studies".
 
 ------------------------------------------------------------------------
 
@@ -37,8 +34,8 @@ RNGkind("L'Ecuyer-CMRG")
 set.seed(123)
 
 library(brms)
-library(rstanarm)
 library(survival)
+library(flexsurv)
 library(tidybayes)
 library(tidyverse)
 library(parallel)
@@ -57,17 +54,17 @@ dat <- local({
   set.seed(1901)
   N <- 150
   TR <- rbinom(N, 1, 0.45)
-  c <- rbinom(N, 1, 0.1)
+  c <- rbinom(N, 1, 0.2)
   z <- rnorm(N)
-  y <- flexsurv::rweibullPH(N, 
-                            shape =  0.4, # gamma
-                            scale = exp(-0.5 + log(0.5)*TR + log(0.2)*z)) # mu
+  y <- rweibullPH(N, 
+                  shape =  1.5, # gamma
+                  scale = exp(-6 + log(1.4)*TR + log(0.8)*z)) # mu
   cens <- runif(N, 0, 60)
   time <- pmin(y, cens)
   status <- as.numeric(y <= cens)
   
-  event <- ifelse(status == 1, rbinom(N, 1, 0.3) + 1, 0) #competing events 1-2
-   
+  event <- ifelse(status == 1, rbinom(N, 1, 0.3)+1, 0) #competing events 1-2
+  
   data.frame(
     ID = 1:N,
     TIME = time,
@@ -75,18 +72,17 @@ dat <- local({
     censored = 1 - status,
     EVENT = event,
     TREATMENT =  factor(TR,
-                            levels = c(0, 1),   
-                            labels = c("CNTR", "NEW_TR")), #factor(TR),
+                        levels = c(0, 1),   
+                        labels = c("CNTR", "NEW_TR")), #factor(TR),
     c = factor(c),
     z = z
   )
 })
 
-
 head(dat)
 ```
 
-Presenting event summary for controls and new treatment group (85 CNTR vs 65 NEW_TR): event 1 and event 2 are the two competing events, 0 for censored data.
+Presenting event summary for controls and new treatment group: event 1 and event 2 are the two competing events, 0 for censored data.
 
 ```{r}
 table(dat$TREATMENT,  useNA = "ifany")
@@ -134,47 +130,47 @@ bbff2 <- bf(TIME | cens(censored2) ~   0 + Intercept + TREATMENT + c,
 ## output is median HR, and 95% qCrI for treatment effect, 
 ## and probability of recovery graduating : p(HR >1 | Dati) = # draws with HR >1 / 4000
 fit.main.event1 <- brm(bbff1,
-                  data = dat,     
-                  chains = 4,
-                  iter = 1500,
-                  warmup = 500,
-                  seed = 12345,
-                  cores = 1,
-                  stanvars = stanvars_weibullPH,
-                  prior = c(prior(normal(0, 20), class = "b", coef = "Intercept"),
-                            prior(normal(0, sqrt(.5)), class = b), 
-                            prior(exponential(1), class = gamma)),
-                  backend = "cmdstanr", ## rstan
-                  refresh = 0)
+                       data = dat,     
+                       chains = 4,
+                       iter = 1500,
+                       warmup = 500,
+                       seed = 12345,
+                       cores = 1,
+                       stanvars = stanvars_weibullPH,
+                       prior = c(prior(normal(0, 20), class = "b", coef = "Intercept"),
+                                 prior(normal(0, sqrt(.5)), class = b), 
+                                 prior(exponential(1), class = gamma)),
+                       backend = "cmdstanr", ## rstan
+                       refresh = 0)
 fit.main.event2 <- brm(bbff2,
-                  data = dat,     
-                  chains = 4,
-                  iter = 1500,
-                  warmup = 500,
-                  seed = 12345,
-                  cores = 1,
-                  stanvars = stanvars_weibullPH,
-                  prior = c(prior(normal(0, 20), class = "b", coef = "Intercept"),
-                            prior(normal(0, sqrt(.5)), class = b), 
-                            prior(exponential(1), class = gamma)),
-                  backend = "cmdstanr", ## rstan
-                  refresh = 0) 
+                       data = dat,     
+                       chains = 4,
+                       iter = 1500,
+                       warmup = 500,
+                       seed = 12345,
+                       cores = 1,
+                       stanvars = stanvars_weibullPH,
+                       prior = c(prior(normal(0, 20), class = "b", coef = "Intercept"),
+                                 prior(normal(0, sqrt(.5)), class = b), 
+                                 prior(exponential(1), class = gamma)),
+                       backend = "cmdstanr", ## rstan
+                       refresh = 0) 
 ```
 
 ```{r}
 #fit.main.event1
 pos.draws <- fit.main.event1 %>% 
-    tidybayes::spread_draws(b_Intercept, b_TREATMENTNEW_TR , b_c1   , gamma)
-  # print(dim(pos.draws))
-  # print(colSums(is.na(pos.draws)))
+  spread_draws(b_Intercept, b_TREATMENTNEW_TR , b_c1   , gamma)
+# print(dim(pos.draws))
+# print(colSums(is.na(pos.draws)))
 HR.CrI <- quantile(exp(pos.draws$b_TREATMENTNEW_TR),
-                     probs =c(0.5, 0.025, 0.975),  na.rm = FALSE) %>% 
-    as.data.frame() %>% t() 
+                   probs =c(0.5, 0.025, 0.975),  na.rm = FALSE) %>% 
+  as.data.frame() %>% t() 
 HR.CrI.pr <- HR.CrI %>% 
-    cbind(count.HRvs1  = sum(exp(pos.draws$b_TREATMENTNEW_TR)>1)) %>% 
-    as.data.frame() %>%
-    mutate(pr = count.HRvs1 /dim(pos.draws)[1], ## probability of graduating in this dataset
-           success = ifelse(pr > 0.975, 1, 0 )) ## definition of success with this dataset
+  cbind(count.HRvs1  = sum(exp(pos.draws$b_TREATMENTNEW_TR)>1)) %>% 
+  as.data.frame() %>%
+  mutate(pr = count.HRvs1 /dim(pos.draws)[1], ## probability of graduating in this dataset
+         success = ifelse(pr > 0.975, 1, 0 )) ## definition of success with this dataset
 HR.CrI.pr
 ```
 
@@ -194,14 +190,14 @@ dat0_cens <- dat %>% filter(event.all == 0 & TIME < 60) ## 32 patients
 ### 2. Defining number simulations K
 
 ```{r}
-nsim <- 3  ## K
+nsim <- 100  ## K
 # cores to use in the fitting if parallelized
-cores <- 1 
+cores <- 4
 ```
 
 ### 3. Predicting baseline allocation of new patients
 
-Maximum enrollement for the new treatment arm is 125.
+Maximum enrolment for the new treatment arm is 125.
 
 ```{r}
 extra.new.tr <- 125 - sum(dat$TREATMENT == "NEW_TR")
@@ -211,7 +207,9 @@ D_new <- lapply (1:nsim, function(x) {
   d <- data.frame(
     ID = paste0("NEW", seq_len(n.control+ extra.new.tr)),
     TREATMENT = factor(rep(c("CNTR", "NEW_TR"), times = c(n.control, extra.new.tr))),
-    c = factor(sample(c(0, 1), n.control+extra.new.tr, replace = TRUE, prob = c(0.9, 0.1)))
+    c = factor(rbinom(n.control+extra.new.tr, 1, 
+                      rbeta(1, table(dat$c)["1"]+1, sum(table(dat$c))-table(dat$c)["1"]+1)),
+               levels = c(0, 1))
   )
 })
 
@@ -233,7 +231,7 @@ dat_new.tr1 <- dat %>% filter(TREATMENT == "NEW_TR") %>%
   filter(event.all == 1 | TIME  == 60) %>% 
   select(ID, TREATMENT, c, TIME, EVENT)  ## 45 patients
 dat_new.tr0 <- lapply(dat0, \(x) x %>% filter(TREATMENT == "NEW_TR") )
-                      #function(x) {  dat_new.tr0 <-  x %>% filter(TREATMENT == "NEW_TR")})
+#function(x) {  dat_new.tr0 <-  x %>% filter(TREATMENT == "NEW_TR")})
 ## 89 patients to predict: 32 already enrolled, 60 new
 
 # control datasets
@@ -244,7 +242,7 @@ dat_control0 <- lapply(dat0, \(x) x %>% filter(TREATMENT == "CNTR") )
 ## XX patients to predict: 22 already enrolled, new patients in the trial (new accruals - from negative binomial)
 ```
 
-## STRATEGY A
+## Main analysis (A)
 
 Modeling stratifying over treatment arm, using C as the only covariate in the model.
 
@@ -253,9 +251,9 @@ Modeling stratifying over treatment arm, using C as the only covariate in the mo
 ```{r}
 ## models 
 bbff1.modelingA <- bf(TIME | cens(censored1) ~   0 + Intercept  + c,
-            family = weibullPH)
+                      family = weibullPH)
 bbff2.modelingA <- bf(TIME | cens(censored2) ~   0 + Intercept  + c,
-            family = weibullPH)
+                      family = weibullPH)
 ```
 
 ```{r}
@@ -275,29 +273,21 @@ fit_control <- fit.noPH(dataset = dat %>% filter(TREATMENT == "CNTR"),
 ```{r}
 ## new predicted dataset 
 predicted_new.tr <- predicted_dataset_noPH(data_to_predict = dat_new.tr0, 
-                                               data_observed = dat_new.tr1, 
-                                               n.sim = nsim, 
-                                               model1 = fit_new.tr$Fit1, 
-                                               model2 = fit_new.tr$Fit2, 
-                                               cores = cores)
+                                           data_observed = dat_new.tr1, 
+                                           n.sim = nsim, 
+                                           model1 = fit_new.tr$Fit1, 
+                                           model2 = fit_new.tr$Fit2, 
+                                           cores = cores)
 
 predicted_control <- predicted_dataset_noPH(data_to_predict = dat_control0, 
-                                                data_observed = dat_control1, 
-                                                n.sim = nsim, 
-                                                model1 = fit_control$Fit1, 
-                                                model2 = fit_control$Fit2, 
-                                                cores = cores)
-
-#predicted <- lapply (1:nsim , \(x) rbind(predicted_control[[x]] , 
- #                                        predicted_new.tr [[x]]))
+                                            data_observed = dat_control1, 
+                                            n.sim = nsim, 
+                                            model1 = fit_control$Fit1, 
+                                            model2 = fit_control$Fit2, 
+                                            cores = cores)
 
 predicted <- lapply (1:nsim , \(x) rbind(predicted_control[[x]] , 
-                                         predicted_new.tr [[x]]) %>%
-                                    mutate(event.predicted = ifelse(is.na(event.predicted), 0,
-                                                                    event.predicted), 
-                                           time.predicted = ifelse(time.predicted == 0, 0.01,
-                                                                   time.predicted)))
-
+                                         predicted_new.tr[[x]]))
 ```
 
 ## 6.A - Analytic step
@@ -313,34 +303,35 @@ predicted_an <- mclapply(predicted,
 
 ```{r}
 analysis.HR <- as.data.frame(do.call(rbind, predicted_an %>% map(2)))
+analysis.HR$success <- factor(analysis.HR$success, levels = 0:1)
 head(analysis.HR)
 ```
 
 ```{r}
-PPOS <- as.numeric(1 - (table(analysis.HR$success, useNA = "ifany") %>% prop.table() )[1])
+PPOS <- (table(analysis.HR$success, useNA = "ifany") %>% prop.table())["1"]
 PPOS
 ```
 
-## STRATEGY B
+## Sensitivity analysis (B)
 
 Modeling using PH assumption on the treatment effect and adding prior belief on treatment effect, using C as extra covariate in the model.
 
-Choosing $\mu$ and $\sigma$ for prior on the treatment effect
+Choosing $\mu$ (mu.fit) and $\sigma^2$ (var.fit) for prior on the treatment effect
 
 ```{r}
 mu.fit <- 2
-sd.fit <- 0.1 
+var.fit <- 0.1 
 ```
 
 ### 4.B - Modeling step
 
-Prior on treatment effect centered on $log(2)$
+Prior on log-treatment effect (log(csHR)) centered on $log(2)$
 ```{r}
 ## models 
 bbff1.modelingB <- bf(TIME | cens(censored1) ~   0 + Intercept + TREATMENT + c,
-            family = weibullPH)
+                      family = weibullPH)
 bbff2.modelingB <- bf(TIME | cens(censored2) ~   0 + Intercept + TREATMENT + c,
-            family = weibullPH)
+                      family = weibullPH)
 ```
 
 
@@ -349,23 +340,18 @@ bbff2.modelingB <- bf(TIME | cens(censored2) ~   0 + Intercept + TREATMENT + c,
 fit_HR2 <- fit.PH.HR(dataset = dat, 
                      brms_function1 = bbff1.modelingB,
                      brms_function2 = bbff2.modelingB,
-                     HR.mean = log(mu.fit), 
-                     HR.sd = sqrt(sd.fit))
+                     logHR.mean = log(mu.fit), 
+                     logHR.sd = sqrt(var.fit))
 ```
 
 ### 5.B - Predictive step
 
 ```{r}
 pred.datasets_HR2 <- predicted_dataset_PH.HR(data_to_predict = dat0, 
-                           data_observed = dat1, 
-                           model1 = fit_HR2$Fit1, 
-                           model2 = fit_HR2$Fit2, 
-                           n.sim = nsim , cores)
-
-pred.datasets_HR2 <- lapply (1:nsim , \(x) pred.datasets_HR2[[x]] %>%
-                                    mutate(event.predicted = ifelse(is.na(event.predicted), 0,
-                                                                    event.predicted), 
-                                           time.predicted = ifelse(time.predicted == 0, 0.01, time.predicted)))
+                                             data_observed = dat1, 
+                                             model1 = fit_HR2$Fit1, 
+                                             model2 = fit_HR2$Fit2, 
+                                             n.sim = nsim , cores)
 ```
 
 ### 6.B - Analytic step
@@ -379,15 +365,17 @@ analysis.datasets_HR2 <- mclapply(pred.datasets_HR2,
 
 ```{r}
 analysis.HR2 <- as.data.frame(do.call(rbind, analysis.datasets_HR2 %>% map(2)))
+analysis.HR2$success <- factor(analysis.HR2$success, levels = 0:1)
 ```
 
 ```{r}
 table(analysis.HR2$success, useNA = "ifany")
-PPOS <- as.numeric(1 - (table(analysis.HR2$success, useNA = "ifany") %>% prop.table() )[1])
+
+PPOS <- (table(analysis.HR2$success, useNA = "ifany") %>% prop.table())["1"]
 PPOS
 ```
 
-# Session info.
+# Session info
 
 ```{r}
 sessionInfo()
