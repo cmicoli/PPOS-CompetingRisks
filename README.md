@@ -1,5 +1,5 @@
 
-# Predictive probability of success (PPOS) - application with time-to-event data in the presence of competing event data. 
+# Predictive probability of success (PPoS) - application to time-to-event data in the presence of competing risks
 
 Chiara Micoli, Andrea Discacciati
 
@@ -7,12 +7,14 @@ Karolinska Institutet, Sweden
 
 Published: 2024-08-12
 
-Last updated: 2024-08-12
+Last updated: 2024-12-18
 
 ------------------------------------------------------------------------
 
-Example for results presented in the paper: “Simulation-based Bayesian predictive probability of success for
-interim monitoring of clinical trials with competing event data: two case studies”
+Reproducible example using simulated data for the the paper
+“Simulation-based Bayesian predictive probability of success for interim
+monitoring of clinical trials with competing event data: two case
+studies”.
 
 ------------------------------------------------------------------------
 
@@ -28,8 +30,8 @@ RNGkind("L'Ecuyer-CMRG")
 set.seed(123)
 
 library(brms)
-library(rstanarm)
 library(survival)
+library(flexsurv)
 library(tidybayes)
 library(tidyverse)
 library(parallel)
@@ -49,17 +51,17 @@ dat <- local({
   set.seed(1901)
   N <- 150
   TR <- rbinom(N, 1, 0.45)
-  c <- rbinom(N, 1, 0.1)
+  c <- rbinom(N, 1, 0.2)
   z <- rnorm(N)
-  y <- flexsurv::rweibullPH(N, 
-                            shape =  0.4, # gamma
-                            scale = exp(-0.5 + log(0.5)*TR + log(0.2)*z)) # mu
+  y <- rweibullPH(N, 
+                  shape =  1.5, # gamma
+                  scale = exp(-6 + log(1.4)*TR + log(0.8)*z)) # mu
   cens <- runif(N, 0, 60)
   time <- pmin(y, cens)
   status <- as.numeric(y <= cens)
   
-  event <- ifelse(status == 1, rbinom(N, 1, 0.3) + 1, 0) #competing events 1-2
-   
+  event <- ifelse(status == 1, rbinom(N, 1, 0.3)+1, 0) #competing events 1-2
+  
   data.frame(
     ID = 1:N,
     TIME = time,
@@ -67,28 +69,26 @@ dat <- local({
     censored = 1 - status,
     EVENT = event,
     TREATMENT =  factor(TR,
-                            levels = c(0, 1),   
-                            labels = c("CNTR", "NEW_TR")), #factor(TR),
+                        levels = c(0, 1),   
+                        labels = c("CNTR", "NEW_TR")), #factor(TR),
     c = factor(c),
     z = z
   )
 })
 
-
 head(dat)
 ```
 
-     ID         TIME status censored EVENT TREATMENT c           z
-      1 41.021730032      0        1     0      CNTR 0  1.37224254
-      2  5.123673330      1        0     1      CNTR 0  0.24595045
-      3 15.566988970      1        0     1      CNTR 0 -0.32276743
-      4  0.006174074      1        0     2      CNTR 0  0.02744533
-      5 27.295880378      0        1     0      CNTR 0  0.99959343
-      6 42.601054255      0        1     0    NEW_TR 0  0.75863798
+      ID      TIME status censored EVENT TREATMENT c           z
+    1  1 41.021730      0        1     0      CNTR 1  1.37224254
+    2  2 47.274011      0        1     0      CNTR 0  0.24595045
+    3  3 37.410411      0        1     0      CNTR 0 -0.32276743
+    4  4  9.822373      1        0     2      CNTR 1  0.02744533
+    5  5 27.295880      0        1     0      CNTR 1  0.99959343
+    6  6 42.601054      0        1     0    NEW_TR 0  0.75863798
 
-Presenting event summary for controls and new treatment group (85 CNTR
-vs 65 NEW_TR): event 1 and event 2 are the two competing events, 0 for
-censored data.
+Presenting event summary for controls and new treatment group: event 1
+and event 2 are the two competing events, 0 for censored data.
 
 ``` r
 table(dat$TREATMENT,  useNA = "ifany")
@@ -104,15 +104,15 @@ table(dat$TREATMENT, dat$EVENT, useNA = "ifany")
 
             
               0  1  2
-      CNTR   22 46 17
-      NEW_TR 32 22 11
+      CNTR   51 21 13
+      NEW_TR 43 17  5
 
 ``` r
 summary(dat$TIME)
 ```
 
-        Min.  1st Qu.   Median     Mean  3rd Qu.     Max. 
-     0.00001  0.05216  2.25706 10.64806 18.76344 59.80789 
+       Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+     0.5683 12.8427 20.8761 22.8823 32.9039 54.3467 
 
 Preparing data for fitting brms models.
 
@@ -168,77 +168,77 @@ bbff2 <- bf(TIME | cens(censored2) ~   0 + Intercept + TREATMENT + c,
 ## output is median HR, and 95% qCrI for treatment effect, 
 ## and probability of recovery graduating : p(HR >1 | Dati) = # draws with HR >1 / 4000
 fit.main.event1 <- brm(bbff1,
-                  data = dat,     
-                  chains = 4,
-                  iter = 1500,
-                  warmup = 500,
-                  seed = 12345,
-                  cores = 1,
-                  stanvars = stanvars_weibullPH,
-                  prior = c(prior(normal(0, 20), class = "b", coef = "Intercept"),
-                            prior(normal(0, sqrt(.5)), class = b), 
-                            prior(exponential(1), class = gamma)),
-                  backend = "cmdstanr", ## rstan
-                  refresh = 0)
+                       data = dat,     
+                       chains = 4,
+                       iter = 1500,
+                       warmup = 500,
+                       seed = 12345,
+                       cores = 1,
+                       stanvars = stanvars_weibullPH,
+                       prior = c(prior(normal(0, 20), class = "b", coef = "Intercept"),
+                                 prior(normal(0, sqrt(.5)), class = b), 
+                                 prior(exponential(1), class = gamma)),
+                       backend = "cmdstanr", ## rstan
+                       refresh = 0)
 ```
 
     Running MCMC with 4 sequential chains...
 
-    Chain 1 finished in 0.3 seconds.
-    Chain 2 finished in 0.4 seconds.
-    Chain 3 finished in 0.4 seconds.
-    Chain 4 finished in 0.3 seconds.
+    Chain 1 finished in 0.6 seconds.
+    Chain 2 finished in 0.7 seconds.
+    Chain 3 finished in 0.6 seconds.
+    Chain 4 finished in 0.6 seconds.
 
     All 4 chains finished successfully.
-    Mean chain execution time: 0.4 seconds.
-    Total execution time: 2.0 seconds.
+    Mean chain execution time: 0.6 seconds.
+    Total execution time: 2.7 seconds.
 
 ``` r
 fit.main.event2 <- brm(bbff2,
-                  data = dat,     
-                  chains = 4,
-                  iter = 1500,
-                  warmup = 500,
-                  seed = 12345,
-                  cores = 1,
-                  stanvars = stanvars_weibullPH,
-                  prior = c(prior(normal(0, 20), class = "b", coef = "Intercept"),
-                            prior(normal(0, sqrt(.5)), class = b), 
-                            prior(exponential(1), class = gamma)),
-                  backend = "cmdstanr", ## rstan
-                  refresh = 0) 
+                       data = dat,     
+                       chains = 4,
+                       iter = 1500,
+                       warmup = 500,
+                       seed = 12345,
+                       cores = 1,
+                       stanvars = stanvars_weibullPH,
+                       prior = c(prior(normal(0, 20), class = "b", coef = "Intercept"),
+                                 prior(normal(0, sqrt(.5)), class = b), 
+                                 prior(exponential(1), class = gamma)),
+                       backend = "cmdstanr", ## rstan
+                       refresh = 0) 
 ```
 
     Running MCMC with 4 sequential chains...
 
-    Chain 1 finished in 0.4 seconds.
-    Chain 2 finished in 0.3 seconds.
-    Chain 3 finished in 0.4 seconds.
-    Chain 4 finished in 0.3 seconds.
+    Chain 1 finished in 0.7 seconds.
+    Chain 2 finished in 0.6 seconds.
+    Chain 3 finished in 0.5 seconds.
+    Chain 4 finished in 0.5 seconds.
 
     All 4 chains finished successfully.
-    Mean chain execution time: 0.3 seconds.
-    Total execution time: 1.7 seconds.
+    Mean chain execution time: 0.6 seconds.
+    Total execution time: 2.5 seconds.
 
 ``` r
 #fit.main.event1
 pos.draws <- fit.main.event1 %>% 
-    tidybayes::spread_draws(b_Intercept, b_TREATMENTNEW_TR , b_c1   , gamma)
-  # print(dim(pos.draws))
-  # print(colSums(is.na(pos.draws)))
+  spread_draws(b_Intercept, b_TREATMENTNEW_TR , b_c1   , gamma)
+# print(dim(pos.draws))
+# print(colSums(is.na(pos.draws)))
 HR.CrI <- quantile(exp(pos.draws$b_TREATMENTNEW_TR),
-                     probs =c(0.5, 0.025, 0.975),  na.rm = FALSE) %>% 
-    as.data.frame() %>% t() 
+                   probs =c(0.5, 0.025, 0.975),  na.rm = FALSE) %>% 
+  as.data.frame() %>% t() 
 HR.CrI.pr <- HR.CrI %>% 
-    cbind(count.HRvs1  = sum(exp(pos.draws$b_TREATMENTNEW_TR)>1)) %>% 
-    as.data.frame() %>%
-    mutate(pr = count.HRvs1 /dim(pos.draws)[1], ## probability of graduating in this dataset
-           success = ifelse(pr > 0.975, 1, 0 )) ## definition of success with this dataset
+  cbind(count.HRvs1  = sum(exp(pos.draws$b_TREATMENTNEW_TR)>1)) %>% 
+  as.data.frame() %>%
+  mutate(pr = count.HRvs1 /dim(pos.draws)[1], ## probability of graduating in this dataset
+         success = ifelse(pr > 0.975, 1, 0 )) ## definition of success with this dataset
 HR.CrI.pr
 ```
 
-            50%      2.5%     97.5% count.HRvs1     pr success
-    . 0.5303063 0.3241296 0.8450462          10 0.0025       0
+           50%      2.5%    97.5% count.HRvs1    pr success
+    . 1.265445 0.7109435 2.281368        3156 0.789       0
 
 # Predictive probability of success analysis
 
@@ -256,14 +256,14 @@ dat0_cens <- dat %>% filter(event.all == 0 & TIME < 60) ## 32 patients
 ### 2. Defining number simulations K
 
 ``` r
-nsim <- 3  ## K
+nsim <- 100  ## K
 # cores to use in the fitting if parallelized
-cores <- 1 
+cores <- 4
 ```
 
 ### 3. Predicting baseline allocation of new patients
 
-Maximum enrollement for the new treatment arm is 125.
+Maximum enrolment for the new treatment arm is 125.
 
 ``` r
 extra.new.tr <- 125 - sum(dat$TREATMENT == "NEW_TR")
@@ -273,7 +273,9 @@ D_new <- lapply (1:nsim, function(x) {
   d <- data.frame(
     ID = paste0("NEW", seq_len(n.control+ extra.new.tr)),
     TREATMENT = factor(rep(c("CNTR", "NEW_TR"), times = c(n.control, extra.new.tr))),
-    c = factor(sample(c(0, 1), n.control+extra.new.tr, replace = TRUE, prob = c(0.9, 0.1)))
+    c = factor(rbinom(n.control+extra.new.tr, 1, 
+                      rbeta(1, table(dat$c)["1"]+1, sum(table(dat$c))-table(dat$c)["1"]+1)),
+               levels = c(0, 1))
   )
 })
 
@@ -295,7 +297,7 @@ dat_new.tr1 <- dat %>% filter(TREATMENT == "NEW_TR") %>%
   filter(event.all == 1 | TIME  == 60) %>% 
   select(ID, TREATMENT, c, TIME, EVENT)  ## 45 patients
 dat_new.tr0 <- lapply(dat0, \(x) x %>% filter(TREATMENT == "NEW_TR") )
-                      #function(x) {  dat_new.tr0 <-  x %>% filter(TREATMENT == "NEW_TR")})
+#function(x) {  dat_new.tr0 <-  x %>% filter(TREATMENT == "NEW_TR")})
 ## 89 patients to predict: 32 already enrolled, 60 new
 
 # control datasets
@@ -306,7 +308,7 @@ dat_control0 <- lapply(dat0, \(x) x %>% filter(TREATMENT == "CNTR") )
 ## XX patients to predict: 22 already enrolled, new patients in the trial (new accruals - from negative binomial)
 ```
 
-## STRATEGY A
+## Main analysis (A)
 
 Modeling stratifying over treatment arm, using C as the only covariate
 in the model.
@@ -316,9 +318,9 @@ in the model.
 ``` r
 ## models 
 bbff1.modelingA <- bf(TIME | cens(censored1) ~   0 + Intercept  + c,
-            family = weibullPH)
+                      family = weibullPH)
 bbff2.modelingA <- bf(TIME | cens(censored2) ~   0 + Intercept  + c,
-            family = weibullPH)
+                      family = weibullPH)
 ```
 
 ``` r
@@ -330,25 +332,25 @@ fit_new.tr <- fit.noPH(dataset = dat %>% filter(TREATMENT == "NEW_TR"),
 
     Running MCMC with 4 parallel chains...
 
-    Chain 1 finished in 0.4 seconds.
-    Chain 2 finished in 0.4 seconds.
-    Chain 3 finished in 0.4 seconds.
-    Chain 4 finished in 0.4 seconds.
+    Chain 1 finished in 0.7 seconds.
+    Chain 2 finished in 0.6 seconds.
+    Chain 3 finished in 0.6 seconds.
+    Chain 4 finished in 0.6 seconds.
 
     All 4 chains finished successfully.
-    Mean chain execution time: 0.4 seconds.
-    Total execution time: 0.4 seconds.
+    Mean chain execution time: 0.6 seconds.
+    Total execution time: 0.8 seconds.
 
     Running MCMC with 4 parallel chains...
 
-    Chain 1 finished in 0.4 seconds.
-    Chain 2 finished in 0.4 seconds.
-    Chain 3 finished in 0.4 seconds.
-    Chain 4 finished in 0.4 seconds.
+    Chain 1 finished in 0.6 seconds.
+    Chain 2 finished in 0.5 seconds.
+    Chain 3 finished in 0.5 seconds.
+    Chain 4 finished in 0.5 seconds.
 
     All 4 chains finished successfully.
-    Mean chain execution time: 0.4 seconds.
-    Total execution time: 0.5 seconds.
+    Mean chain execution time: 0.5 seconds.
+    Total execution time: 0.7 seconds.
 
 ``` r
 # model fit for control arm 
@@ -359,53 +361,46 @@ fit_control <- fit.noPH(dataset = dat %>% filter(TREATMENT == "CNTR"),
 
     Running MCMC with 4 parallel chains...
 
-    Chain 1 finished in 0.5 seconds.
-    Chain 2 finished in 0.5 seconds.
-    Chain 3 finished in 0.5 seconds.
-    Chain 4 finished in 0.5 seconds.
+    Chain 2 finished in 0.7 seconds.
+    Chain 1 finished in 0.9 seconds.
+    Chain 3 finished in 0.8 seconds.
+    Chain 4 finished in 0.8 seconds.
 
     All 4 chains finished successfully.
-    Mean chain execution time: 0.5 seconds.
-    Total execution time: 0.6 seconds.
+    Mean chain execution time: 0.8 seconds.
+    Total execution time: 1.0 seconds.
 
     Running MCMC with 4 parallel chains...
 
-    Chain 1 finished in 0.5 seconds.
-    Chain 2 finished in 0.4 seconds.
-    Chain 3 finished in 0.5 seconds.
-    Chain 4 finished in 0.4 seconds.
+    Chain 2 finished in 0.7 seconds.
+    Chain 4 finished in 0.7 seconds.
+    Chain 1 finished in 0.9 seconds.
+    Chain 3 finished in 0.8 seconds.
 
     All 4 chains finished successfully.
-    Mean chain execution time: 0.4 seconds.
-    Total execution time: 0.6 seconds.
+    Mean chain execution time: 0.8 seconds.
+    Total execution time: 1.0 seconds.
 
 ## 5.A - Predictive step
 
 ``` r
 ## new predicted dataset 
 predicted_new.tr <- predicted_dataset_noPH(data_to_predict = dat_new.tr0, 
-                                               data_observed = dat_new.tr1, 
-                                               n.sim = nsim, 
-                                               model1 = fit_new.tr$Fit1, 
-                                               model2 = fit_new.tr$Fit2, 
-                                               cores = cores)
+                                           data_observed = dat_new.tr1, 
+                                           n.sim = nsim, 
+                                           model1 = fit_new.tr$Fit1, 
+                                           model2 = fit_new.tr$Fit2, 
+                                           cores = cores)
 
 predicted_control <- predicted_dataset_noPH(data_to_predict = dat_control0, 
-                                                data_observed = dat_control1, 
-                                                n.sim = nsim, 
-                                                model1 = fit_control$Fit1, 
-                                                model2 = fit_control$Fit2, 
-                                                cores = cores)
-
-#predicted <- lapply (1:nsim , \(x) rbind(predicted_control[[x]] , 
- #                                        predicted_new.tr [[x]]))
+                                            data_observed = dat_control1, 
+                                            n.sim = nsim, 
+                                            model1 = fit_control$Fit1, 
+                                            model2 = fit_control$Fit2, 
+                                            cores = cores)
 
 predicted <- lapply (1:nsim , \(x) rbind(predicted_control[[x]] , 
-                                         predicted_new.tr [[x]]) %>%
-                                    mutate(event.predicted = ifelse(is.na(event.predicted), 0,
-                                                                    event.predicted), 
-                                           time.predicted = ifelse(time.predicted == 0, 0.01,
-                                                                   time.predicted)))
+                                         predicted_new.tr[[x]]))
 ```
 
 ## 6.A - Analytic step
@@ -431,43 +426,48 @@ predicted_an <- mclapply(predicted,
 
 ``` r
 analysis.HR <- as.data.frame(do.call(rbind, predicted_an %>% map(2)))
+analysis.HR$success <- factor(analysis.HR$success, levels = 0:1)
 head(analysis.HR)
 ```
 
        HR.median HR.025lower HR.975upper count.HRvs1      pr success
-    .  0.4244328   0.2909498   0.6145362           0 0.00000       0
-    .1 0.5209696   0.3668775   0.7410176           0 0.00000       0
-    .2 0.5912076   0.4202998   0.8230841           5 0.00125       0
+    .  1.0289299   0.7478691    1.423476        2287 0.57175       0
+    .1 0.7960582   0.5766778    1.110761         352 0.08800       0
+    .2 1.2763156   0.9460287    1.693957        3782 0.94550       0
+    .3 1.0912287   0.8143284    1.462149        2847 0.71175       0
+    .4 1.8410029   1.3340284    2.498667        4000 1.00000       1
+    .5 1.3031306   0.9635078    1.767451        3820 0.95500       0
 
 ``` r
-PPOS <- as.numeric(1 - (table(analysis.HR$success, useNA = "ifany") %>% prop.table() )[1])
+PPOS <- (table(analysis.HR$success, useNA = "ifany") %>% prop.table())["1"]
 PPOS
 ```
 
-    [1] 0
+       1 
+    0.44 
 
-## STRATEGY B
+## Sensitivity analysis (B)
 
 Modeling using PH assumption on the treatment effect and adding prior
 belief on treatment effect, using C as extra covariate in the model.
 
-Choosing $\mu$ and $\sigma$ for prior on the treatment effect
+Choosing $\mu$ (mu.fit) and $\sigma^2$ (var.fit) for prior on the treatment effect
 
 ``` r
 mu.fit <- 2
-sd.fit <- 0.1 
+var.fit <- 0.1 
 ```
 
 ### 4.B - Modeling step
 
-Prior on treatment effect centered on $log(2)$
+Prior on log-treatment effect (log(csHR)) centered on $log(2)$
 
 ``` r
 ## models 
 bbff1.modelingB <- bf(TIME | cens(censored1) ~   0 + Intercept + TREATMENT + c,
-            family = weibullPH)
+                      family = weibullPH)
 bbff2.modelingB <- bf(TIME | cens(censored2) ~   0 + Intercept + TREATMENT + c,
-            family = weibullPH)
+                      family = weibullPH)
 ```
 
 ``` r
@@ -475,45 +475,40 @@ bbff2.modelingB <- bf(TIME | cens(censored2) ~   0 + Intercept + TREATMENT + c,
 fit_HR2 <- fit.PH.HR(dataset = dat, 
                      brms_function1 = bbff1.modelingB,
                      brms_function2 = bbff2.modelingB,
-                     HR.mean = log(mu.fit), 
-                     HR.sd = sqrt(sd.fit))
+                     logHR.mean = log(mu.fit), 
+                     logHR.sd = sqrt(var.fit))
 ```
 
     Running MCMC with 4 parallel chains...
 
-    Chain 1 finished in 1.0 seconds.
-    Chain 2 finished in 1.0 seconds.
-    Chain 3 finished in 1.1 seconds.
-    Chain 4 finished in 1.1 seconds.
+    Chain 2 finished in 1.4 seconds.
+    Chain 3 finished in 1.4 seconds.
+    Chain 1 finished in 1.4 seconds.
+    Chain 4 finished in 1.4 seconds.
 
     All 4 chains finished successfully.
-    Mean chain execution time: 1.1 seconds.
-    Total execution time: 1.1 seconds.
+    Mean chain execution time: 1.4 seconds.
+    Total execution time: 1.5 seconds.
 
     Running MCMC with 4 parallel chains...
 
-    Chain 2 finished in 0.8 seconds.
-    Chain 1 finished in 0.9 seconds.
-    Chain 3 finished in 0.9 seconds.
-    Chain 4 finished in 0.8 seconds.
+    Chain 2 finished in 1.3 seconds.
+    Chain 3 finished in 1.3 seconds.
+    Chain 4 finished in 1.2 seconds.
+    Chain 1 finished in 1.5 seconds.
 
     All 4 chains finished successfully.
-    Mean chain execution time: 0.9 seconds.
-    Total execution time: 1.0 seconds.
+    Mean chain execution time: 1.3 seconds.
+    Total execution time: 1.6 seconds.
 
 ### 5.B - Predictive step
 
 ``` r
 pred.datasets_HR2 <- predicted_dataset_PH.HR(data_to_predict = dat0, 
-                           data_observed = dat1, 
-                           model1 = fit_HR2$Fit1, 
-                           model2 = fit_HR2$Fit2, 
-                           n.sim = nsim , cores)
-
-pred.datasets_HR2 <- lapply (1:nsim , \(x) pred.datasets_HR2[[x]] %>%
-                                    mutate(event.predicted = ifelse(is.na(event.predicted), 0,
-                                                                    event.predicted), 
-                                           time.predicted = ifelse(time.predicted == 0, 0.01, time.predicted)))
+                                             data_observed = dat1, 
+                                             model1 = fit_HR2$Fit1, 
+                                             model2 = fit_HR2$Fit2, 
+                                             n.sim = nsim , cores)
 ```
 
 ### 6.B - Analytic step
@@ -537,6 +532,7 @@ analysis.datasets_HR2 <- mclapply(pred.datasets_HR2,
 
 ``` r
 analysis.HR2 <- as.data.frame(do.call(rbind, analysis.datasets_HR2 %>% map(2)))
+analysis.HR2$success <- factor(analysis.HR2$success, levels = 0:1)
 ```
 
 ``` r
@@ -544,28 +540,30 @@ table(analysis.HR2$success, useNA = "ifany")
 ```
 
 
-    0 
-    3 
+     0  1 
+    25 75 
 
 ``` r
-PPOS <- as.numeric(1 - (table(analysis.HR2$success, useNA = "ifany") %>% prop.table() )[1])
+PPOS <- (table(analysis.HR2$success, useNA = "ifany") %>% prop.table())["1"]
 PPOS
 ```
 
-    [1] 0
+       1 
+    0.75 
 
-## Session info.
+# Session info
 
 ``` r
 sessionInfo()
 ```
 
-    R version 4.3.2 (2023-10-31 ucrt)
-    Platform: x86_64-w64-mingw32/x64 (64-bit)
-    Running under: Windows 10 x64 (build 19045)
+    R version 4.4.2 (2024-10-31)
+    Platform: aarch64-apple-darwin20
+    Running under: macOS Sequoia 15.1
 
     Matrix products: default
-
+    BLAS:   /Library/Frameworks/R.framework/Versions/4.4-arm64/Resources/lib/libRblas.0.dylib 
+    LAPACK: /Library/Frameworks/R.framework/Versions/4.4-arm64/Resources/lib/libRlapack.dylib;  LAPACK version 3.12.0
 
     Random number generation:
      RNG:     L'Ecuyer-CMRG 
@@ -573,9 +571,7 @@ sessionInfo()
      Sample:  Rejection 
      
     locale:
-    [1] LC_COLLATE=Swedish_Sweden.utf8  LC_CTYPE=Swedish_Sweden.utf8   
-    [3] LC_MONETARY=Swedish_Sweden.utf8 LC_NUMERIC=C                   
-    [5] LC_TIME=Swedish_Sweden.utf8    
+    [1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
 
     time zone: Europe/Stockholm
     tzcode source: internal
@@ -585,45 +581,38 @@ sessionInfo()
     [8] base     
 
     other attached packages:
-     [1] lubridate_1.9.3 forcats_1.0.0   stringr_1.5.1   dplyr_1.1.4    
-     [5] purrr_1.0.2     readr_2.1.5     tidyr_1.3.1     tibble_3.2.1   
-     [9] ggplot2_3.5.1   tidyverse_2.0.0 tidybayes_3.0.6 survival_3.5-8 
-    [13] rstanarm_2.32.1 brms_2.21.0     Rcpp_1.0.12    
+     [1] rstan_2.32.6        StanHeaders_2.32.10 lubridate_1.9.3    
+     [4] forcats_1.0.0       stringr_1.5.1       dplyr_1.1.4        
+     [7] purrr_1.0.2         readr_2.1.5         tidyr_1.3.1        
+    [10] tibble_3.2.1        ggplot2_3.5.1       tidyverse_2.0.0    
+    [13] tidybayes_3.0.7     flexsurv_2.3.2      survival_3.7-0     
+    [16] brms_2.22.0         Rcpp_1.0.13-1      
 
     loaded via a namespace (and not attached):
-      [1] gridExtra_2.3        inline_0.3.19        rlang_1.1.3         
-      [4] magrittr_2.0.3       matrixStats_1.3.0    compiler_4.3.2      
-      [7] loo_2.7.0            vctrs_0.6.5          reshape2_1.4.4      
-     [10] quadprog_1.5-8       pkgconfig_2.0.3      arrayhelpers_1.1-0  
-     [13] fastmap_1.1.1        backports_1.4.1      utf8_1.2.4          
-     [16] cmdstanr_0.7.1       threejs_0.3.3        promises_1.3.0      
-     [19] deSolve_1.40         rmarkdown_2.26       markdown_1.12       
-     [22] tzdb_0.4.0           ps_1.7.6             nloptr_2.0.3        
-     [25] xfun_0.43            jsonlite_1.8.8       mstate_0.3.2        
-     [28] later_1.3.2          R6_2.5.1             dygraphs_1.1.1.6    
-     [31] stringi_1.8.3        StanHeaders_2.32.7   boot_1.3-28.1       
-     [34] numDeriv_2016.8-1.1  rstan_2.32.6         knitr_1.46          
-     [37] zoo_1.8-12           base64enc_0.1-3      bayesplot_1.11.1    
-     [40] timechange_0.3.0     httpuv_1.6.15        Matrix_1.6-5        
-     [43] splines_4.3.2        igraph_2.0.3         tidyselect_1.2.1    
-     [46] rstudioapi_0.16.0    abind_1.4-5          yaml_2.3.8          
-     [49] codetools_0.2-20     miniUI_0.1.1.1       processx_3.8.4      
-     [52] curl_5.2.1           pkgbuild_1.4.4       lattice_0.22-6      
-     [55] plyr_1.8.9           shiny_1.8.1.1        withr_3.0.0         
-     [58] bridgesampling_1.1-2 posterior_1.5.0      coda_0.19-4.1       
-     [61] evaluate_0.23        RcppParallel_5.1.7   muhaz_1.2.6.4       
-     [64] ggdist_3.3.2         xts_0.13.2           pillar_1.9.0        
-     [67] tensorA_0.36.2.1     checkmate_2.3.1      DT_0.33             
-     [70] stats4_4.3.2         shinyjs_2.1.0        distributional_0.4.0
-     [73] generics_0.1.3       hms_1.1.3            rstantools_2.4.0    
-     [76] munsell_0.5.1        scales_1.3.0         minqa_1.2.6         
-     [79] gtools_3.9.5         xtable_1.8-4         glue_1.7.0          
-     [82] flexsurv_2.3         tools_4.3.2          shinystan_2.6.0     
-     [85] data.table_1.15.4    lme4_1.1-35.3        colourpicker_1.3.0  
-     [88] mvtnorm_1.2-4        grid_4.3.2           QuickJSR_1.1.3      
-     [91] crosstalk_1.2.1      colorspace_2.1-0     nlme_3.1-164        
-     [94] cli_3.6.2            fansi_1.0.6          svUnit_1.0.6        
-     [97] Brobdingnag_1.2-9    V8_4.4.2             gtable_0.3.5        
-    [100] digest_0.6.35        htmlwidgets_1.6.4    htmltools_0.5.8.1   
-    [103] lifecycle_1.0.4      statmod_1.5.0        mime_0.12           
-    [106] shinythemes_1.2.0    MASS_7.3-60.0.1     
+     [1] tidyselect_1.2.1     svUnit_1.0.6         loo_2.8.0           
+     [4] fastmap_1.2.0        TH.data_1.1-2        tensorA_0.36.2.1    
+     [7] digest_0.6.37        estimability_1.5.1   timechange_0.3.0    
+    [10] lifecycle_1.0.4      statmod_1.5.0        processx_3.8.4      
+    [13] magrittr_2.0.3       posterior_1.6.0      compiler_4.4.2      
+    [16] rlang_1.1.4          tools_4.4.2          utf8_1.2.4          
+    [19] yaml_2.3.10          data.table_1.16.2    knitr_1.49          
+    [22] bridgesampling_1.1-2 pkgbuild_1.4.5       cmdstanr_0.8.0      
+    [25] multcomp_1.4-26      abind_1.4-8          withr_3.0.2         
+    [28] numDeriv_2016.8-1.1  stats4_4.4.2         grid_4.4.2          
+    [31] mstate_0.3.3         fansi_1.0.6          inline_0.3.20       
+    [34] xtable_1.8-4         colorspace_2.1-1     emmeans_1.10.5      
+    [37] scales_1.3.0         MASS_7.3-61          cli_3.6.3           
+    [40] mvtnorm_1.3-2        rmarkdown_2.29       generics_0.1.3      
+    [43] RcppParallel_5.1.9   rstudioapi_0.17.1    tzdb_0.4.0          
+    [46] splines_4.4.2        bayesplot_1.11.1     muhaz_1.2.6.4       
+    [49] matrixStats_1.4.1    vctrs_0.6.5          Matrix_1.7-1        
+    [52] sandwich_3.1-1       jsonlite_1.8.9       hms_1.1.3           
+    [55] arrayhelpers_1.1-0   ggdist_3.3.2         glue_1.8.0          
+    [58] codetools_0.2-20     ps_1.8.1             distributional_0.5.0
+    [61] stringi_1.8.4        gtable_0.3.6         QuickJSR_1.4.0      
+    [64] quadprog_1.5-8       munsell_0.5.1        pillar_1.9.0        
+    [67] htmltools_0.5.8.1    Brobdingnag_1.2-9    deSolve_1.40        
+    [70] R6_2.5.1             evaluate_1.0.1       lattice_0.22-6      
+    [73] backports_1.5.0      rstantools_2.4.0     gridExtra_2.3       
+    [76] coda_0.19-4.1        nlme_3.1-166         checkmate_2.3.2     
+    [79] xfun_0.49            zoo_1.8-12           pkgconfig_2.0.3     
